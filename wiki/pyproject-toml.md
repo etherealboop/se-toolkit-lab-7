@@ -110,10 +110,10 @@ Checks [`Python`](./python.md#what-is-python) code for lint errors using `ruff`.
 
 ```toml
 [tool.poe.tasks.typecheck]
-parallel = ["ty-check", "pyright-check"]
+sequence = ["ty-check", "pyright-check"]
 ```
 
-Runs both type checkers (`ty` and `pyright`) in parallel.
+Runs both type checkers (`ty` and `pyright`) in sequence.
 
 ### Dynamic analysis
 

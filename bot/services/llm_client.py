@@ -115,15 +115,21 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """LMS assistant. Call ONE tool at a time:
-{"tool": "name", "args": {}}
+SYSTEM_PROMPT = """LMS assistant. You MUST call exactly ONE tool per response.
+
+Format: {"tool": "name", "args": {}}
 
 Tools: get_items, get_learners, get_scores, get_pass_rates, get_timeline, get_groups, get_top_learners, get_completion_rate, trigger_sync.
 
-RULES:
-1. ONE tool per response
-2. Wait for result before next call
-3. Then provide final answer with numbers"""
+CRITICAL: After calling ONE tool, WAIT for the result. Do NOT call multiple tools.
+
+Example flow:
+Q: "what labs?" → {"tool": "get_items", "args": {}}
+[receives result] → A: "Labs: Lab 01, Lab 02..."
+
+Q: "scores lab 4?" → {"tool": "get_pass_rates", "args": {"lab": "lab-04"}}
+[receives result] → A: "Task 1: 60%, Task 2: 70%..."
+"""
 
 
 class LLMClient:
@@ -165,8 +171,11 @@ class LLMClient:
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"].get("content", "")
 
-            # Parse FIRST JSON tool call
-            match = re.search(r'\{[^{}]*"tool"[^{}]*\}', content)
+            # Parse FIRST JSON tool call - handle nested braces
+            # Match {"tool": "name", "args": {...}}
+            match = re.search(
+                r'\{"tool":\s*"[^"]+"\s*,\s*"args":\s*\{[^}]*\}\s*\}', content
+            )
             if match:
                 try:
                     tc = json.loads(match.group())
@@ -177,12 +186,16 @@ class LLMClient:
                     conversation.append(
                         {
                             "role": "user",
-                            "content": f"Result: {json.dumps(result)}\n\nContinue or answer.",
+                            "content": f"Result: {json.dumps(result)}\n\nNow provide final answer.",
                         }
                     )
                     continue
-                except:
-                    pass
+                except Exception as e:
+                    conversation.append({"role": "assistant", "content": content})
+                    conversation.append(
+                        {"role": "user", "content": f"Error: {e}. Try again."}
+                    )
+                    continue
 
             return content.strip()
 

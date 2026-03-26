@@ -18,8 +18,9 @@ GREETING_PATTERNS = [
 ]
 
 GIBBERISH_PATTERNS = [
-    r"^[a-z]{1,5}$",  # Very short random strings
-    r"^[^a-zA-Z]{1,3}$",  # Just symbols
+    r"^[a-z]{1,6}$",  # Very short random strings (up to 6 chars)
+    r"^[^a-zA-Z\s]{1,5}$",  # Just symbols
+    r"^(asdf|qwer|zxcv)[a-z]*$",  # Keyboard mashing patterns
 ]
 
 

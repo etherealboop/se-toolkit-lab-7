@@ -77,22 +77,22 @@ def run_telegram_mode() -> None:
 
     @dp.message(CommandStart())
     async def cmd_start(message: types.Message):
-        result = asyncio.run(handle_start(message.from_user.id))
+        result = await handle_start(message.from_user.id)
         await message.answer(result)
 
     @dp.message(Command("help"))
     async def cmd_help(message: types.Message):
-        result = asyncio.run(handle_help(message.from_user.id))
+        result = await handle_help(message.from_user.id)
         await message.answer(result)
 
     @dp.message(Command("health"))
     async def cmd_health(message: types.Message):
-        result = asyncio.run(handle_health(message.from_user.id))
+        result = await handle_health(message.from_user.id)
         await message.answer(result)
 
     @dp.message(Command("labs"))
     async def cmd_labs(message: types.Message):
-        result = asyncio.run(handle_labs(message.from_user.id))
+        result = await handle_labs(message.from_user.id)
         await message.answer(result)
 
     @dp.message(Command("scores"))
@@ -100,12 +100,12 @@ def run_telegram_mode() -> None:
         lab = (
             message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
         )
-        result = asyncio.run(handle_scores(message.from_user.id, lab))
+        result = await handle_scores(message.from_user.id, lab)
         await message.answer(result)
 
     @dp.message()
     async def handle_unknown_message(message: types.Message):
-        result = asyncio.run(handle_unknown(message.from_user.id, message.text))
+        result = await handle_unknown(message.from_user.id, message.text)
         await message.answer(result)
 
     print(f"Bot started. Polling...")

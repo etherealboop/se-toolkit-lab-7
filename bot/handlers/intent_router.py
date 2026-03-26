@@ -6,7 +6,39 @@ Uses LLM to interpret user messages and call appropriate backend tools.
 
 import os
 import sys
+import re
 from services.llm_client import LLMClient
+
+
+# Simple patterns to avoid LLM calls for greetings/gibberish
+GREETING_PATTERNS = [
+    r"^\s*(hi|hello|hey|greetings|good\s+(morning|afternoon|evening))\s*[!.,]*\s*$",
+    r"^\s*(bye|goodbye|see\s+you)\s*[!.,]*\s*$",
+    r"^\s*thanks?\s*[!.,]*\s*$",
+]
+
+GIBBERISH_PATTERNS = [
+    r"^[a-z]{1,5}$",  # Very short random strings
+    r"^[^a-zA-Z]{1,3}$",  # Just symbols
+]
+
+
+def is_greeting(message: str) -> bool:
+    """Check if message is a simple greeting."""
+    msg_lower = message.lower().strip()
+    for pattern in GREETING_PATTERNS:
+        if re.match(pattern, msg_lower):
+            return True
+    return False
+
+
+def is_gibberish(message: str) -> bool:
+    """Check if message looks like gibberish."""
+    msg_lower = message.lower().strip()
+    for pattern in GIBBERISH_PATTERNS:
+        if re.match(pattern, msg_lower):
+            return True
+    return False
 
 
 async def route_natural_language_query(message: str, debug: bool = False) -> str:
@@ -20,6 +52,14 @@ async def route_natural_language_query(message: str, debug: bool = False) -> str
     Returns:
         Response text
     """
+    # Handle greetings without LLM
+    if is_greeting(message):
+        return "Hello! I'm your LMS assistant. I can help you with:\n• Checking lab scores and pass rates\n• Viewing student performance\n• Comparing groups\n\nTry asking: 'what labs are available?' or 'show me scores for lab 4'"
+
+    # Handle gibberish without LLM
+    if is_gibberish(message):
+        return "I didn't understand that. Try asking me something like:\n• 'What labs are available?'\n• 'Show me scores for lab 4'\n• 'Which lab has the lowest pass rate?'"
+
     # Load config from environment
     llm_key = os.getenv("LLM_API_KEY", "")
     llm_base = os.getenv("LLM_API_BASE_URL", "http://localhost:42005/v1")

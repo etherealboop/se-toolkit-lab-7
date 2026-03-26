@@ -3,8 +3,9 @@
 Telegram bot entry point with --test mode.
 
 Usage:
-    uv run bot.py --test "/start"    # Test mode, no Telegram connection
-    uv run bot.py                    # Normal mode, connects to Telegram
+    uv run bot.py --test "/start"           # Test mode, slash command
+    uv run bot.py --test "what labs..."     # Test mode, natural language
+    uv run bot.py                           # Normal mode, connects to Telegram
 """
 
 import argparse
@@ -17,8 +18,17 @@ from handlers import (
     handle_labs,
     handle_scores,
     handle_unknown,
+    handle_natural_language,
 )
 from config import load_config
+
+
+def is_natural_language_query(text: str) -> bool:
+    """
+    Check if the input is a natural language query (not a slash command).
+    """
+    text = text.strip()
+    return not text.startswith("/")
 
 
 def get_handler_for_command(command: str):
@@ -49,6 +59,12 @@ def run_test_mode(command: str) -> None:
     """Run a command in test mode and print result to stdout."""
     import asyncio
 
+    # Check if it's a natural language query
+    if is_natural_language_query(command):
+        result = asyncio.run(handle_natural_language(command, debug=True))
+        print(result)
+        sys.exit(0)
+
     handler, kwargs = get_handler_for_command(command)
 
     if handler is None:
@@ -65,6 +81,8 @@ def run_telegram_mode() -> None:
     import asyncio
     from aiogram import Bot, Dispatcher, types
     from aiogram.filters import CommandStart, Command
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from handlers import KEYBOARD_BUTTONS
 
     config = load_config()
 
@@ -75,10 +93,23 @@ def run_telegram_mode() -> None:
     bot = Bot(token=config["BOT_TOKEN"])
     dp = Dispatcher()
 
+    def get_keyboard_markup():
+        keyboard = []
+        for row in KEYBOARD_BUTTONS:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=btn["text"], callback_data=btn["callback_data"]
+                    )
+                    for btn in row
+                ]
+            )
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
     @dp.message(CommandStart())
     async def cmd_start(message: types.Message):
         result = await handle_start(message.from_user.id)
-        await message.answer(result)
+        await message.answer(result, reply_markup=get_keyboard_markup())
 
     @dp.message(Command("help"))
     async def cmd_help(message: types.Message):
@@ -104,9 +135,32 @@ def run_telegram_mode() -> None:
         await message.answer(result)
 
     @dp.message()
-    async def handle_unknown_message(message: types.Message):
-        result = await handle_unknown(message.from_user.id, message.text)
+    async def handle_message(message: types.Message):
+        # Handle natural language queries via LLM
+        result = await handle_natural_language(message.text)
         await message.answer(result)
+
+    # Handle callback queries from inline buttons
+    @dp.callback_query()
+    async def handle_callback(callback: types.CallbackQuery):
+        data = callback.data
+        result = ""
+        if data == "labs":
+            result = await handle_labs(0)
+        elif data == "health":
+            result = await handle_health(0)
+        elif data == "scores_lab-4":
+            result = await handle_scores(0, "lab-4")
+        elif data == "top_learners":
+            result = await handle_natural_language(
+                "Who are the top 5 students in lab 4?"
+            )
+        elif data == "help":
+            result = await handle_help(0)
+        else:
+            result = "Unknown action"
+        await callback.message.answer(result)
+        await callback.answer()
 
     print(f"Bot started. Polling...")
     asyncio.run(dp.start_polling(bot))
@@ -118,7 +172,7 @@ def main() -> None:
         "--test",
         type=str,
         metavar="COMMAND",
-        help="Test mode: run a command and print result (e.g., '/start')",
+        help="Test mode: run a command and print result (e.g., '/start' or 'what labs are available')",
     )
 
     args = parser.parse_args()

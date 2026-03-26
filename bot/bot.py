@@ -16,8 +16,14 @@ from handlers import (
     handle_health,
     handle_labs,
     handle_scores,
+    handle_unknown,
 )
 from config import load_config
+
+
+async def handle_unknown(user_id: int, command: str) -> str:
+    """Handle unknown commands."""
+    return f"Unknown command: {command}. Use /help to see available commands."
 
 
 def get_handler_for_command(command: str):
@@ -41,7 +47,7 @@ def get_handler_for_command(command: str):
         lab = parts[1] if len(parts) > 1 else None
         return handle_scores, {"user_id": 0, "lab": lab}
     else:
-        return None, {}
+        return handle_unknown, {"user_id": 0, "command": command}
 
 
 def run_test_mode(command: str) -> None:

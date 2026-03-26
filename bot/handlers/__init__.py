@@ -32,3 +32,8 @@ async def handle_scores(user_id: int, lab: str | None = None) -> str:
     if lab:
         return f"Scores for {lab}: 85/100"
     return "Your average score: 85/100"
+
+
+async def handle_unknown(user_id: int, command: str) -> str:
+    """Handle unknown commands."""
+    return f"Unknown command: {command}. Use /help to see available commands."

@@ -17,8 +17,8 @@ Architecture:
     test mode and Telegram mode.
 """
 
-import argparse
 import sys
+import argparse
 
 from handlers import (
     handle_start,

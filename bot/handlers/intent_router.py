@@ -6,38 +6,41 @@ Uses LLM to interpret user messages and call appropriate backend tools.
 
 import os
 import sys
-import re
 from services.llm_client import LLMClient
 
 
-# Simple patterns to avoid LLM calls for greetings/gibberish
-GREETING_PATTERNS = [
-    r"^\s*(hi|hello|hey|greetings|good\s+(morning|afternoon|evening))\s*[!.,]*\s*$",
-    r"^\s*(bye|goodbye|see\s+you)\s*[!.,]*\s*$",
-    r"^\s*thanks?\s*[!.,]*\s*$",
-]
-
-GIBBERISH_PATTERNS = [
-    r"^[a-z]{1,6}$",  # Very short random strings (up to 6 chars)
-    r"^[^a-zA-Z\s]{1,5}$",  # Just symbols
-    r"^(asdf|qwer|zxcv)[a-z]*$",  # Keyboard mashing patterns
-]
+# Simple greeting words
+GREETING_WORDS = {"hi", "hello", "hey", "greetings", "bye", "goodbye"}
 
 
 def is_greeting(message: str) -> bool:
     """Check if message is a simple greeting."""
-    msg_lower = message.lower().strip()
-    for pattern in GREETING_PATTERNS:
-        if re.match(pattern, msg_lower):
-            return True
+    msg_lower = message.lower().strip().strip("!.,?")
+    # Check if message is exactly a greeting word
+    if msg_lower in GREETING_WORDS:
+        return True
+    # Check for "good morning/afternoon/evening"
+    if msg_lower.startswith("good "):
+        return True
+    # Check for "thanks" or "thank you"
+    if msg_lower in ("thanks", "thank you", "thx"):
+        return True
     return False
 
 
 def is_gibberish(message: str) -> bool:
     """Check if message looks like gibberish."""
     msg_lower = message.lower().strip()
-    for pattern in GIBBERISH_PATTERNS:
-        if re.match(pattern, msg_lower):
+    # Very short strings (1-6 chars) with only letters
+    if len(msg_lower) <= 6 and msg_lower.isalpha():
+        # Check for keyboard patterns
+        keyboard_patterns = ["asdf", "qwer", "zxcv", "aaaa", "zzzz"]
+        for pattern in keyboard_patterns:
+            if msg_lower.startswith(pattern):
+                return True
+        # Random short strings without vowels are likely gibberish
+        vowels = set("aeiou")
+        if not any(v in msg_lower for v in vowels) and len(msg_lower) >= 4:
             return True
     return False
 

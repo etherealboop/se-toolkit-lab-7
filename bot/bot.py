@@ -62,14 +62,54 @@ def run_test_mode(command: str) -> None:
 
 def run_telegram_mode() -> None:
     """Run the bot in Telegram mode (connects to Telegram API)."""
+    import asyncio
+    from aiogram import Bot, Dispatcher, types
+    from aiogram.filters import CommandStart, Command
+
     config = load_config()
 
     if not config["BOT_TOKEN"]:
         print("Error: BOT_TOKEN not set. Create .env.bot.secret with your bot token.")
         sys.exit(1)
 
-    print("Telegram mode not implemented yet — coming in Task 2")
-    sys.exit(0)
+    bot = Bot(token=config["BOT_TOKEN"])
+    dp = Dispatcher()
+
+    @dp.message(CommandStart())
+    async def cmd_start(message: types.Message):
+        result = asyncio.run(handle_start(message.from_user.id))
+        await message.answer(result)
+
+    @dp.message(Command("help"))
+    async def cmd_help(message: types.Message):
+        result = asyncio.run(handle_help(message.from_user.id))
+        await message.answer(result)
+
+    @dp.message(Command("health"))
+    async def cmd_health(message: types.Message):
+        result = asyncio.run(handle_health(message.from_user.id))
+        await message.answer(result)
+
+    @dp.message(Command("labs"))
+    async def cmd_labs(message: types.Message):
+        result = asyncio.run(handle_labs(message.from_user.id))
+        await message.answer(result)
+
+    @dp.message(Command("scores"))
+    async def cmd_scores(message: types.Message):
+        lab = (
+            message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+        )
+        result = asyncio.run(handle_scores(message.from_user.id, lab))
+        await message.answer(result)
+
+    @dp.message()
+    async def handle_unknown_message(message: types.Message):
+        result = asyncio.run(handle_unknown(message.from_user.id, message.text))
+        await message.answer(result)
+
+    print(f"Bot started. Polling...")
+    asyncio.run(dp.start_polling(bot))
 
 
 def main() -> None:

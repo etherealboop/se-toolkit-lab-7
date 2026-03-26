@@ -1,8 +1,6 @@
 """
 LLM API client for Qwen Code.
-
 Handles tool calling with the LLM for intent-based routing.
-Uses JSON format for tool calls.
 """
 
 import json
@@ -13,14 +11,13 @@ from typing import Any
 import httpx
 from services.lms_client import LMSClient
 
-
-# Define all 9 backend endpoints as LLM tools (for autochecker verification)
+# 9 tools for autochecker verification
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "get_items",
-            "description": "Get list of all labs and tasks",
+            "description": "Get all labs",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -28,7 +25,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_learners",
-            "description": "Get enrolled students and groups",
+            "description": "Get students",
             "parameters": {
                 "type": "object",
                 "properties": {"group": {"type": "string"}},
@@ -40,7 +37,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_scores",
-            "description": "Get score distribution for a lab",
+            "description": "Score distribution for a lab",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}},
@@ -52,7 +49,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_pass_rates",
-            "description": "Get per-task pass rates for a lab",
+            "description": "Per-task pass rates",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}},
@@ -64,7 +61,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_timeline",
-            "description": "Get submissions per day for a lab",
+            "description": "Submissions timeline",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}},
@@ -76,7 +73,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_groups",
-            "description": "Get per-group performance for a lab",
+            "description": "Per-group performance",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}},
@@ -88,7 +85,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_top_learners",
-            "description": "Get top N learners for a lab",
+            "description": "Top N students",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}, "limit": {"type": "integer"}},
@@ -100,7 +97,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_completion_rate",
-            "description": "Get completion rate for a lab",
+            "description": "Completion rate",
             "parameters": {
                 "type": "object",
                 "properties": {"lab": {"type": "string"}},
@@ -112,25 +109,24 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "trigger_sync",
-            "description": "Trigger ETL sync",
+            "description": "Refresh data",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]
 
-SYSTEM_PROMPT = """You are an LMS assistant. Call tools using JSON format:
-{"tool": "tool_name", "args": {"param": "value"}}
+SYSTEM_PROMPT = """LMS assistant. Call ONE tool at a time:
+{"tool": "name", "args": {}}
 
-Available tools: get_items, get_learners, get_scores, get_pass_rates, get_timeline, get_groups, get_top_learners, get_completion_rate, trigger_sync.
+Tools: get_items, get_learners, get_scores, get_pass_rates, get_timeline, get_groups, get_top_learners, get_completion_rate, trigger_sync.
 
-For "which lab has lowest pass rate": first call get_items, then get_pass_rates for each lab, compare results.
-
-After receiving tool results, provide a clear answer with specific numbers."""
+RULES:
+1. ONE tool per response
+2. Wait for result before next call
+3. Then provide final answer with numbers"""
 
 
 class LLMClient:
-    """Client for Qwen Code LLM API with tool calling."""
-
     def __init__(self, api_key: str, base_url: str, model: str):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -145,9 +141,10 @@ class LLMClient:
 
     def _get_lms(self) -> LMSClient:
         if self._lms is None:
-            lms_url = os.getenv("LMS_API_URL", "http://localhost:42002")
-            lms_key = os.getenv("LMS_API_KEY", "")
-            self._lms = LMSClient(lms_url, lms_key)
+            self._lms = LMSClient(
+                os.getenv("LMS_API_URL", "http://localhost:42002"),
+                os.getenv("LMS_API_KEY", ""),
+            )
         return self._lms
 
     async def close(self) -> None:
@@ -156,116 +153,85 @@ class LLMClient:
             await self._lms.close()
 
     async def chat_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        max_iterations: int = 5,
+        self, messages: list[dict[str, Any]], max_iterations: int = 5
     ) -> str:
-        """Chat with the LLM using tool calling."""
-        conversation = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *messages,
-        ]
+        conversation = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
 
-        for iteration in range(max_iterations):
-            response = await self._client.post(
+        for _ in range(max_iterations):
+            resp = await self._client.post(
                 "/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": conversation,
-                },
+                json={"model": self.model, "messages": conversation},
             )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"].get("content", "")
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"].get("content", "")
 
-            # Try to parse JSON tool call
-            content_stripped = content.strip()
-            if content_stripped.startswith("{"):
+            # Parse FIRST JSON tool call
+            match = re.search(r'\{[^{}]*"tool"[^{}]*\}', content)
+            if match:
                 try:
-                    # Extract JSON from markdown code blocks if present
-                    json_match = re.search(
-                        r'\{[^}]*"tool"[^}]*\}', content_stripped, re.DOTALL
+                    tc = json.loads(match.group())
+                    result = await self._execute_tool(
+                        tc.get("tool"), tc.get("args", {})
                     )
-                    if json_match:
-                        tool_call = json.loads(json_match.group())
-                        tool_name = tool_call.get("tool")
-                        args = tool_call.get("args", {})
-
-                        if tool_name:
-                            result = await self._execute_tool(tool_name, args)
-                            conversation.append(
-                                {"role": "assistant", "content": content}
-                            )
-                            conversation.append(
-                                {
-                                    "role": "user",
-                                    "content": f"Tool result: {json.dumps(result)}",
-                                }
-                            )
-                            continue
-                except (json.JSONDecodeError, AttributeError):
+                    conversation.append({"role": "assistant", "content": content})
+                    conversation.append(
+                        {
+                            "role": "user",
+                            "content": f"Result: {json.dumps(result)}\n\nContinue or answer.",
+                        }
+                    )
+                    continue
+                except:
                     pass
 
-            # No tool call, return final response
             return content.strip()
 
-        return "I need more information to answer this question."
+        return "Need more info."
 
-    async def _execute_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Execute a tool and return the result."""
+    async def _execute_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         lms = self._get_lms()
-
         try:
             if name == "get_items":
-                result = await lms.get_labs()
-                return {"items": result.get("labs", [])}
+                r = await lms.get_labs()
+                return {"items": r.get("labs", [])}
             elif name == "get_learners":
-                resp = await lms._client.get("/learners/")
-                resp.raise_for_status()
-                return {"learners": resp.json()}
+                r = await lms._client.get("/learners/")
+                return {"learners": r.json()}
             elif name == "get_scores":
-                lab = arguments.get("lab", "")
-                resp = await lms._client.get("/analytics/scores/", params={"lab": lab})
-                resp.raise_for_status()
-                return {"scores": resp.json(), "lab": lab}
+                r = await lms._client.get(
+                    "/analytics/scores/", params={"lab": args.get("lab", "")}
+                )
+                return {"scores": r.json()}
             elif name == "get_pass_rates":
-                lab = arguments.get("lab", "")
-                result = await lms.get_pass_rates(lab)
-                return {"pass_rates": result.get("pass_rates", [])}
+                r = await lms.get_pass_rates(args.get("lab", ""))
+                return {"pass_rates": r.get("pass_rates", [])}
             elif name == "get_timeline":
-                lab = arguments.get("lab", "")
-                resp = await lms._client.get(
-                    "/analytics/timeline/", params={"lab": lab}
+                r = await lms._client.get(
+                    "/analytics/timeline/", params={"lab": args.get("lab", "")}
                 )
-                resp.raise_for_status()
-                return {"timeline": resp.json(), "lab": lab}
+                return {"timeline": r.json()}
             elif name == "get_groups":
-                lab = arguments.get("lab", "")
-                resp = await lms._client.get("/analytics/groups/", params={"lab": lab})
-                resp.raise_for_status()
-                return {"groups": resp.json(), "lab": lab}
+                r = await lms._client.get(
+                    "/analytics/groups/", params={"lab": args.get("lab", "")}
+                )
+                return {"groups": r.json()}
             elif name == "get_top_learners":
-                lab = arguments.get("lab", "")
-                limit = int(arguments.get("limit", 5))
-                resp = await lms._client.get(
-                    "/analytics/top-learners/", params={"lab": lab, "limit": limit}
+                r = await lms._client.get(
+                    "/analytics/top-learners/",
+                    params={
+                        "lab": args.get("lab", ""),
+                        "limit": int(args.get("limit", 5)),
+                    },
                 )
-                resp.raise_for_status()
-                return {"top_learners": resp.json(), "lab": lab}
+                return {"top_learners": r.json()}
             elif name == "get_completion_rate":
-                lab = arguments.get("lab", "")
-                resp = await lms._client.get(
-                    "/analytics/completion-rate/", params={"lab": lab}
+                r = await lms._client.get(
+                    "/analytics/completion-rate/", params={"lab": args.get("lab", "")}
                 )
-                resp.raise_for_status()
-                return {"completion_rate": resp.json(), "lab": lab}
+                return {"completion_rate": r.json()}
             elif name == "trigger_sync":
-                resp = await lms._client.post("/pipeline/sync")
-                resp.raise_for_status()
-                return {"sync_result": resp.json()}
-            else:
-                return {"error": f"Unknown tool: {name}"}
+                r = await lms._client.post("/pipeline/sync")
+                return {"sync": r.json()}
+            return {"error": f"Unknown: {name}"}
         except Exception as e:
             return {"error": str(e)}

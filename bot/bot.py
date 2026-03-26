@@ -21,11 +21,6 @@ from handlers import (
 from config import load_config
 
 
-async def handle_unknown(user_id: int, command: str) -> str:
-    """Handle unknown commands."""
-    return f"Unknown command: {command}. Use /help to see available commands."
-
-
 def get_handler_for_command(command: str):
     """
     Route command to the appropriate handler.

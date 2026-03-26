@@ -1,9 +1,19 @@
 """
 Command handlers for the LMS Telegram bot.
 
-Handlers are plain functions that take input and return text.
-They don't depend on Telegram — same function works from --test mode,
-unit tests, or Telegram.
+Handlers are pure functions that take input (user_id, arguments) and return text.
+They are independent of the Telegram transport layer — the same handler works in:
+- Test mode (--test flag, no Telegram connection)
+- Unit tests
+- Telegram mode (via aiogram)
+
+This separation of concerns makes the code testable and maintainable.
+
+Handler pattern:
+    async def handler_name(user_id: int, optional_arg: str = None) -> str:
+        # Fetch data from backend via LMSClient
+        # Format response
+        return "Response text"
 """
 
 import os
@@ -20,13 +30,19 @@ if env_file.exists():
 
 
 def _get_lms_client() -> LMSClient:
-    """Create LMS client from environment variables."""
+    """
+    Create LMS client from environment variables.
+
+    Returns:
+        Configured LMSClient instance for making backend API calls
+    """
     base_url = os.getenv("LMS_API_URL", "http://localhost:42002")
     api_key = os.getenv("LMS_API_KEY", "")
     return LMSClient(base_url, api_key)
 
 
 # Inline keyboard buttons for common actions
+# Each button has a text label and callback_data for handling clicks
 KEYBOARD_BUTTONS = [
     [{"text": "📊 Labs", "callback_data": "labs"}],
     [{"text": "💚 Health", "callback_data": "health"}],
@@ -37,9 +53,13 @@ KEYBOARD_BUTTONS = [
 
 
 def get_keyboard_markup():
-    """Get inline keyboard markup for Telegram."""
-    from aiogram.types import InlineKeyboardMarkup
-    from aiogram.types import InlineKeyboardButton
+    """
+    Build inline keyboard markup for Telegram.
+
+    Returns:
+        InlineKeyboardMarkup with buttons for common actions
+    """
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     keyboard = []
     for row in KEYBOARD_BUTTONS:
@@ -55,7 +75,18 @@ def get_keyboard_markup():
 
 
 async def handle_start(user_id: int) -> str:
-    """Handle /start command."""
+    """
+    Handle /start command.
+
+    Sends a welcome message with examples of what the bot can do.
+    This is usually the first command a user sends to the bot.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+
+    Returns:
+        Welcome message with usage examples
+    """
     return """Welcome to the LMS Bot!
 
 I can help you check lab scores, pass rates, and student performance.
@@ -70,7 +101,17 @@ Use /help to see all commands."""
 
 
 async def handle_help(user_id: int) -> str:
-    """Handle /help command."""
+    """
+    Handle /help command.
+
+    Lists all available slash commands and natural language query examples.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+
+    Returns:
+        Help message with command list and examples
+    """
     return """Available commands:
 /start — Welcome message
 /help — List all commands
@@ -88,7 +129,18 @@ You can also ask me questions in natural language:
 
 
 async def handle_health(user_id: int) -> str:
-    """Handle /health command."""
+    """
+    Handle /health command.
+
+    Checks if the backend API is reachable and returns the number of items.
+    This is useful for monitoring and debugging.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+
+    Returns:
+        Health status message with item count or error details
+    """
     client = _get_lms_client()
     try:
         result = await client.get_health()
@@ -101,7 +153,17 @@ async def handle_health(user_id: int) -> str:
 
 
 async def handle_labs(user_id: int) -> str:
-    """Handle /labs command."""
+    """
+    Handle /labs command.
+
+    Fetches and lists all available labs from the backend API.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+
+    Returns:
+        Formatted list of labs with IDs and names
+    """
     client = _get_lms_client()
     try:
         result = await client.get_labs()
@@ -121,7 +183,19 @@ async def handle_labs(user_id: int) -> str:
 
 
 async def handle_scores(user_id: int, lab: str | None = None) -> str:
-    """Handle /scores command."""
+    """
+    Handle /scores command.
+
+    Fetches per-task pass rates for a specific lab. Shows average scores
+    and attempt counts for each task.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+        lab: Lab identifier (e.g., "lab-04"). If None, returns usage message.
+
+    Returns:
+        Formatted list of task pass rates or error message
+    """
     if not lab:
         return "Usage: /scores <lab> (e.g., /scores lab-04)"
 
@@ -152,18 +226,33 @@ async def handle_scores(user_id: int, lab: str | None = None) -> str:
 
 async def handle_natural_language(message: str, debug: bool = False) -> str:
     """
-    Handle natural language queries via LLM.
+    Handle natural language queries via LLM intent router.
+
+    This handler sends the user's message to the LLM, which interprets the intent
+    and calls appropriate backend tools to fetch data. The LLM then summarizes
+    the results into a natural language response.
 
     Args:
-        message: User's message text
+        message: User's message text (natural language query)
         debug: If True, print debug info to stderr
 
     Returns:
-        Response from LLM
+        Response from LLM with fetched data
     """
     return await route_natural_language_query(message, debug)
 
 
 async def handle_unknown(user_id: int, command: str) -> str:
-    """Handle unknown commands."""
+    """
+    Handle unknown/unrecognized commands.
+
+    Provides a helpful message directing the user to /help.
+
+    Args:
+        user_id: Telegram user ID (not used in this handler)
+        command: The unrecognized command string
+
+    Returns:
+        Error message suggesting /help
+    """
     return f"Unknown command: {command}. Use /help to see available commands."

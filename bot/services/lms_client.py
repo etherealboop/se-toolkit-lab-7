@@ -1,14 +1,32 @@
 """
-LMS API client.
+LMS API client for the Telegram bot.
 
-Handles HTTP requests to the LMS backend with Bearer token authentication.
+This module handles HTTP requests to the LMS backend API with Bearer token
+authentication. It provides methods for:
+- Health checks
+- Fetching labs and tasks
+- Getting pass rates, scores, and analytics
+
+The client uses httpx for async HTTP requests and handles errors gracefully.
 """
 
 import httpx
 
 
 class LMSClient:
-    """Client for the LMS backend API."""
+    """
+    Client for the LMS backend API.
+
+    This client wraps HTTP calls to the LMS backend with proper authentication
+    and error handling. All methods return dictionaries that handlers can format
+    for user responses.
+
+    Example usage:
+        client = LMSClient("http://localhost:42002", "my-api-key")
+        result = await client.get_health()
+        if result["healthy"]:
+            print(f"Backend has {result['items_count']} items")
+    """
 
     def __init__(self, base_url: str, api_key: str):
         """
@@ -28,7 +46,7 @@ class LMSClient:
         )
 
     async def close(self) -> None:
-        """Close the HTTP client."""
+        """Close the HTTP client session."""
         await self._client.aclose()
 
     async def get_health(self) -> dict:
@@ -36,7 +54,9 @@ class LMSClient:
         Check backend health by fetching items.
 
         Returns:
-            Dict with 'healthy' bool and 'items_count' or 'error' message.
+            Dict with 'healthy' bool and either 'items_count' or 'error' message.
+            Example: {"healthy": True, "items_count": 50}
+                     {"healthy": False, "error": "connection refused"}
         """
         try:
             response = await self._client.get("/items/")
@@ -57,10 +77,11 @@ class LMSClient:
 
     async def get_labs(self) -> dict:
         """
-        Get list of available labs.
+        Get list of available labs from the backend.
 
         Returns:
             Dict with 'labs' list or 'error' message.
+            Example: {"labs": [{"id": "lab-1", "name": "Lab 01 – ..."}]}
         """
         try:
             response = await self._client.get("/items/")
@@ -95,18 +116,18 @@ class LMSClient:
 
     async def get_pass_rates(self, lab: str) -> dict:
         """
-        Get per-task pass rates for a lab.
+        Get per-task pass rates for a specific lab.
 
         Args:
-            lab: Lab ID (e.g., "lab-04")
+            lab: Lab identifier (e.g., "lab-04")
 
         Returns:
             Dict with 'pass_rates' list or 'error' message.
+            Example: {"pass_rates": [{"task": "Task 1", "avg_score": 60.9, "attempts": 686}]}
         """
         try:
             response = await self._client.get(
-                "/analytics/pass-rates/",
-                params={"lab": lab},
+                "/analytics/pass-rates/", params={"lab": lab}
             )
             response.raise_for_status()
             data = response.json()

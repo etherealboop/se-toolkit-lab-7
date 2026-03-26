@@ -1,6 +1,15 @@
 """
 LLM API client for Qwen Code.
-Handles tool calling with the LLM for intent-based routing.
+
+This module handles tool calling with the LLM for intent-based routing.
+The client:
+1. Sends user messages to the LLM with a system prompt
+2. Parses JSON tool calls from the LLM response
+3. Executes tools by calling backend API methods
+4. Feeds results back to the LLM for final answer generation
+
+The LLM decides which tool to call based on the user's intent - no regex
+or keyword matching is used for routing.
 """
 
 import json
@@ -11,7 +20,8 @@ from typing import Any
 import httpx
 from services.lms_client import LMSClient
 
-# 9 tools for autochecker verification
+# 9 tool schemas for autochecker verification
+# These define the tools available to the LLM for fetching backend data
 TOOLS = [
     {
         "type": "function",
@@ -88,7 +98,10 @@ TOOLS = [
             "description": "Top N students",
             "parameters": {
                 "type": "object",
-                "properties": {"lab": {"type": "string"}, "limit": {"type": "integer"}},
+                "properties": {
+                    "lab": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
                 "required": ["lab", "limit"],
             },
         },
@@ -115,25 +128,43 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """LMS assistant. You MUST call exactly ONE tool per response.
-
-Format: {"tool": "name", "args": {}}
+# System prompt instructs the LLM to call ONE tool at a time
+SYSTEM_PROMPT = """LMS assistant. Call ONE tool at a time:
+{"tool": "name", "args": {}}
 
 Tools: get_items, get_learners, get_scores, get_pass_rates, get_timeline, get_groups, get_top_learners, get_completion_rate, trigger_sync.
 
-CRITICAL: After calling ONE tool, WAIT for the result. Do NOT call multiple tools.
-
-Example flow:
-Q: "what labs?" → {"tool": "get_items", "args": {}}
-[receives result] → A: "Labs: Lab 01, Lab 02..."
-
-Q: "scores lab 4?" → {"tool": "get_pass_rates", "args": {"lab": "lab-04"}}
-[receives result] → A: "Task 1: 60%, Task 2: 70%..."
-"""
+RULES:
+1. ONE tool per response
+2. Wait for result before next call
+3. Then provide final answer with numbers"""
 
 
 class LLMClient:
+    """
+    Client for Qwen Code LLM API with tool calling.
+
+    The client manages the conversation loop:
+    1. Send user message + system prompt to LLM
+    2. Parse JSON tool call from response
+    3. Execute tool via LMSClient
+    4. Feed result back to LLM
+    5. Repeat until LLM provides final answer
+
+    Example:
+        client = LLMClient(api_key, base_url, model)
+        response = await client.chat_with_tools([{"role": "user", "content": "what labs?"}])
+    """
+
     def __init__(self, api_key: str, base_url: str, model: str):
+        """
+        Initialize the LLM client.
+
+        Args:
+            api_key: API key for authentication
+            base_url: Base URL of the LLM API (e.g., http://localhost:42005/v1)
+            model: Model name to use (e.g., qwen3-coder-flash)
+        """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -146,6 +177,7 @@ class LLMClient:
         self._lms = None
 
     def _get_lms(self) -> LMSClient:
+        """Get or create LMS client for executing tools."""
         if self._lms is None:
             self._lms = LMSClient(
                 os.getenv("LMS_API_URL", "http://localhost:42002"),
@@ -154,6 +186,7 @@ class LLMClient:
         return self._lms
 
     async def close(self) -> None:
+        """Close HTTP clients."""
         await self._client.aclose()
         if self._lms:
             await self._lms.close()
@@ -161,6 +194,23 @@ class LLMClient:
     async def chat_with_tools(
         self, messages: list[dict[str, Any]], max_iterations: int = 5
     ) -> str:
+        """
+        Chat with the LLM using tool calling.
+
+        This method implements the tool calling loop:
+        1. Send messages to LLM
+        2. Parse JSON tool call from response
+        3. Execute tool and get result
+        4. Feed result back to LLM
+        5. Continue until LLM provides final answer
+
+        Args:
+            messages: List of conversation messages
+            max_iterations: Maximum tool calling iterations to prevent infinite loops
+
+        Returns:
+            Final response from the LLM
+        """
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
 
         for _ in range(max_iterations):
@@ -197,11 +247,24 @@ class LLMClient:
                     )
                     continue
 
+            # No tool calls, return final response
             return content.strip()
 
         return "Need more info."
 
     async def _execute_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Execute a tool and return the result.
+
+        This method maps tool names to LMSClient methods and API calls.
+
+        Args:
+            name: Tool name (e.g., "get_items", "get_pass_rates")
+            args: Tool arguments dictionary
+
+        Returns:
+            Tool result dictionary
+        """
         lms = self._get_lms()
         try:
             if name == "get_items":

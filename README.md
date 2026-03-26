@@ -91,3 +91,105 @@ By the end of this lab, you should be able to say:
 2. [Backend Integration](./lab/tasks/required/task-2.md) — P0: slash commands + real data
 3. [Intent-Based Natural Language Routing](./lab/tasks/required/task-3.md) — P1: LLM tool use
 4. [Containerize and Document](./lab/tasks/required/task-4.md) — P3: containerize + deploy
+
+## Deploy
+
+This section explains how to deploy the bot alongside the backend using Docker.
+
+### Prerequisites
+
+1. **VM access** — You should have SSH access to your VM
+2. **Bot token** — Get from [@BotFather](https://t.me/BotFather) on Telegram
+3. **LLM API key** — Set up Qwen Code API proxy on your VM (see setup step 1.9)
+4. **Environment file** — `.env.docker.secret` with all required values
+
+### Environment variables
+
+Edit `.env.docker.secret` on your VM and set:
+
+```bash
+# Bot token from @BotFather
+BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
+
+# LLM API (Qwen Code)
+LLM_API_KEY=your-qwen-api-key
+LLM_API_MODEL=qwen3-coder-flash
+
+# LMS API (already set from backend setup)
+LMS_API_KEY=my-secret-api-key
+```
+
+The bot uses these additional env vars (configured automatically in docker-compose.yml):
+
+- `LMS_API_URL=http://backend:8000` — Backend service name inside Docker network
+- `LLM_API_BASE_URL=http://host.docker.internal:42005/v1` — Qwen proxy on host
+
+### Deploy commands
+
+On your VM:
+
+```bash
+cd ~/se-toolkit-lab-7
+
+# Stop the background bot process (if running from Task 2/3)
+pkill -f "bot.py" 2>/dev/null
+
+# Build and start all services
+docker compose --env-file .env.docker.secret up --build -d
+
+# Check status
+docker compose --env-file .env.docker.secret ps
+```
+
+You should see:
+
+```
+NAME                STATUS
+se-toolkit-lab-7-backend-1    Up
+se-toolkit-lab-7-bot-1        Up
+se-toolkit-lab-7-postgres-1   Up (healthy)
+se-toolkit-lab-7-caddy-1      Up
+```
+
+### Verify deployment
+
+1. **Check bot is running:**
+
+   ```bash
+   docker compose --env-file .env.docker.secret logs bot --tail 20
+   ```
+
+   Look for: "Bot started. Polling..."
+
+2. **Check backend is healthy:**
+
+   ```bash
+   curl -sf http://localhost:42002/docs
+   ```
+
+   Should return Swagger UI HTML.
+
+3. **Test in Telegram:**
+   - `/start` — Welcome message
+   - `/health` — Backend status
+   - "what labs are available?" — Natural language query
+   - "show me scores for lab 4" — LLM-powered data fetch
+
+### Troubleshooting
+
+| Symptom | Solution |
+|---------|----------|
+| Bot container restarting | Check logs: `docker compose logs bot` |
+| LLM queries fail | Ensure Qwen proxy is running: `cd ~/qwen-code-oai-proxy && docker compose ps` |
+| Backend connection error | Check `LMS_API_URL` uses `http://backend:8000` not `localhost` |
+| BOT_TOKEN error | Verify token in `.env.docker.secret` |
+
+### Update deployment
+
+After pushing code changes:
+
+```bash
+cd ~/se-toolkit-lab-7
+git pull
+docker compose --env-file .env.docker.secret up --build -d
+```

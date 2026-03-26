@@ -13,3 +13,4 @@ __pycache__/
 tmp
 
 **/settings.local.json
+.vscode/settings.json

@@ -7,6 +7,7 @@ The autochecker dashboard API provides two endpoints:
 Both require HTTP Basic Auth (email + password from settings).
 """
 
+import asyncio
 from datetime import datetime
 
 import httpx
@@ -69,20 +70,43 @@ async def fetch_logs(since: datetime | None = None) -> list[ApiLog]:
     """Fetch check results from the autochecker API with pagination."""
     all_logs: list[ApiLog] = []
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    # Configure client with longer timeouts and keep-alive
+    limits = httpx.Limits(max_keepalive_connections=10, max_connections=10)
+    timeout = httpx.Timeout(120.0, connect=30.0)
+
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
         cursor = since
+        iteration = 0
+        max_retries = 3
+
         while True:
             params: dict[str, str | int] = {"limit": 500}
             if cursor is not None:
                 params["since"] = cursor.isoformat()
 
-            resp = await client.get(
-                f"{settings.autochecker_api_url}/api/logs",
-                params=params,
-                auth=(settings.autochecker_email, settings.autochecker_password),
-            )
-            resp.raise_for_status()
-            page = ApiLogsPage.model_validate(resp.json())
+            iteration += 1
+            retry_count = 0
+
+            while retry_count < max_retries:
+                try:
+                    resp = await client.get(
+                        f"{settings.autochecker_api_url}/api/logs",
+                        params=params,
+                        auth=(
+                            settings.autochecker_email,
+                            settings.autochecker_password,
+                        ),
+                    )
+                    resp.raise_for_status()
+                    page = ApiLogsPage.model_validate(resp.json())
+                    break  # Success, exit retry loop
+                except httpx.RemoteProtocolError as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        raise
+                    # Exponential backoff: wait 1s, 2s, 4s...
+                    wait_time = 2 ** (retry_count - 1)
+                    await asyncio.sleep(wait_time)
 
             all_logs.extend(page.logs)
 

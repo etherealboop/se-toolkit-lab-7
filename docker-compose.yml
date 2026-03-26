@@ -91,6 +91,26 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile
 
+  bot:
+    build:
+      context: bot/
+      args:
+        REGISTRY_PREFIX: ${REGISTRY_PREFIX:-harbor.pg.innopolis.university/docker-hub-cache/}
+    restart: unless-stopped
+    networks:
+      - lms-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN:?'BOT_TOKEN is required'}
+      - LMS_API_URL=http://backend:${BACKEND_CONTAINER_PORT}
+      - LMS_API_KEY=${LMS_API_KEY:?'LMS_API_KEY is required'}
+      - LLM_API_KEY=${LLM_API_KEY:?'LLM_API_KEY is required'}
+      - LLM_API_BASE_URL=http://host.docker.internal:${QWEN_CODE_PROXY_PORT:-42005}/v1
+      - LLM_API_MODEL=${LLM_API_MODEL:-qwen3-coder-flash}
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
 

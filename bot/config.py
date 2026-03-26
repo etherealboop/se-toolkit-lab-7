@@ -14,9 +14,8 @@ Environment variables loaded:
 """
 
 import os
-from pathlib import Path
 from dotenv import load_dotenv
-
+from pathlib import Path
 
 def load_config() -> dict[str, str]:
     """
